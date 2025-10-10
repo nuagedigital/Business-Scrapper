@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Business Scraper with Emails</title>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 30px;
+      background: #f5f5f5;
+    }
+    h1 {
+      color: #333;
+    }
+    input, button {
+      padding: 10px;
+      margin: 5px 0;
+      width: 100%;
+      max-width: 400px;
+      font-size: 16px;
+    }
+    button {
+      background-color: #007BFF;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    pre {
+      background: #fff;
+      padding: 15px;
+      border: 1px solid #ddd;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      max-height: 500px;
+    }
+    #downloadBtn {
+      margin-top: 10px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Business Scraper with Emails</h1>
+
+  <input type="text" id="keyword" placeholder="Business Type (e.g., plumber)" />
+  <input type="text" id="location" placeholder="Location (e.g., New York)" />
+  <button onclick="searchBusinesses()">Search</button>
+  <button id="downloadBtn" onclick="downloadExcel()">⬇️ Download Excel</button>
+
+  <pre id="results">Results will appear here...</pre>
+
+  <script>
+    let scrapedData = []; // To store the results for Excel download
+
+    async function searchBusinesses() {
+      const keyword = document.getElementById('keyword').value.trim();
+      const location = document.getElementById('location').value.trim();
+      const resultBox = document.getElementById('results');
+      const downloadBtn = document.getElementById('downloadBtn');
+
+      if (!keyword || !location) {
+        resultBox.textContent = '❗ Please enter both keyword and location.';
+        return;
+      }
+
+      const searchURL = `https://www.yellowpages.com/search?search_terms=${encodeURIComponent(keyword)}&geo_location_terms=${encodeURIComponent(location)}`;
+      const proxy = 'https://corsproxy.io/?';
+
+      try {
+        resultBox.textContent = '🔍 Fetching businesses...';
+        downloadBtn.style.display = 'none';
+
+        const response = await fetch(proxy + encodeURIComponent(searchURL));
+        const html = await response.text();
+
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const listings = doc.querySelectorAll('.result');
+
+        const results = [];
+
+        for (const listing of listings) {
+          const name = listing.querySelector('a.business-name')?.textContent.trim() || '';
+          const phone = listing.querySelector('.phones')?.textContent.trim() || '';
+          const street = listing.querySelector('.street-address')?.textContent.trim() || '';
+          const city = listing.querySelector('.locality')?.textContent.trim() || '';
+          const address = (street && city) ? `${street}, ${city}` : street || city;
+
+          const websiteLink = listing.querySelector('a.track-visit-website')?.href || '';
+          let email = 'No email found';
+
+          if (websiteLink) {
+            try {
+              const siteURL = websiteLink.startsWith('http') ? websiteLink : `https:${websiteLink}`;
+              const siteRes = await fetch(proxy + encodeURIComponent(siteURL));
+              const siteHTML = await siteRes.text();
+
+              const emailMatch = siteHTML.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+              if (emailMatch) {
+                email = emailMatch[0];
+              }
+            } catch (e) {
+              console.warn(`⚠️ Could not get email from website: ${websiteLink}`);
+            }
+          }
+
+          results.push({ name, phone, address, email });
+        }
+
+        if (results.length === 0) {
+          resultBox.textContent = '❌ No businesses found or page structure changed.';
+          downloadBtn.style.display = 'none';
+        } else {
+          scrapedData = results;
+          resultBox.textContent = JSON.stringify(results, null, 2);
+          downloadBtn.style.display = 'inline-block';
+        }
+
+      } catch (error) {
+        console.error(error);
+        resultBox.textContent = '❌ Error fetching data. Check CORS, proxy, or network connection.';
+        downloadBtn.style.display = 'none';
+      }
+    }
+
+    function downloadExcel() {
+      if (!scrapedData.length) {
+        alert("No data to download.");
+        return;
+      }
+
+      const worksheet = XLSX.utils.json_to_sheet(scrapedData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Businesses");
+
+      XLSX.writeFile(workbook, "business_list.xlsx");
+    }
+  </script>
+
+</body>
+</html>
